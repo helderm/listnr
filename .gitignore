@@ -1,0 +1,7 @@
+devenv/
+*egg-info
+*.pyc
+.tox
+data/timit/*
+data/tidigits/*
+.idea/

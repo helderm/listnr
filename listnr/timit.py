@@ -20,9 +20,13 @@ tf.app.flags.DEFINE_string('max_frames', 0,
 
 NUM_FILTERS = 40
 NUM_FEATURES = 3
-#NUM_FRAMES = 2000
-#REGIONS = ['dr2', 'dr3']
+
+
+#REGIONS = ['dr1']
+#NUM_FRAMES = 100243
 REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
+NUM_FRAMES = 1236543
+#NUM_FRAMES = 451660
 
 _FILENAME_TRAIN = 'train.tfrecords'
 _FILENAME_TEST = 'test.tfrecords'
@@ -37,30 +41,6 @@ def _int64_feature(value):
 
 def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
-
-def _serialize(samples, labels, filename):
-    num_examples = labels.shape[0]
-    if samples.shape[0] != num_examples:
-        raise ValueError("Sample size %d does not match label size %d." %
-                         (samples.shape[0], num_examples))
-    rows = samples.shape[1]
-    cols = samples.shape[2]
-    depth = samples.shape[3]
-
-    #filename = os.path.join(FLAGS.directory, name + '.tfrecords')
-    print('Writing', filename)
-    writer = tf.python_io.TFRecordWriter(filename)
-    for index in range(num_examples):
-        frame_raw = samples[index].tostring()
-        example = tf.train.Example(features=tf.train.Features(feature={
-            #'height': _float_feature(rows),
-            #'width': _float_feature(cols),
-            #'depth': _float_feature(depth),
-            'label': _int64_feature(int(labels[index])),
-            'frame_raw': _bytes_feature(frame_raw)}))
-        writer.write(example.SerializeToString())
-    writer.close()
 
 
 def _get_delta(frame, deltawindow=4):
@@ -132,11 +112,7 @@ def _convert_to_record(frame, label, writer):
     :param label: 1D label tensor
     :param writer: file writer
     """
-
-    rows = frame.shape[1]
-    cols = frame.shape[2]
-    depth = frame.shape[3]
-
+    #assert frame.shape[0] == NUM_FILTERS and frame.shape[1] == NUM_FEATURES and frame.shape[2] == 1
     frame_raw = frame.tostring()
     example = tf.train.Example(features=tf.train.Features(feature={
         # 'height': _float_feature(rows),
@@ -190,10 +166,12 @@ def serialize(train=True):
     phonemes_map = {}
     pho_ctn = 0
     frame_ctn = 0
-    print('Writing', output_path)
-    writer = tf.python_io.TFRecordWriter(output_path)
+
+    frames = np.ndarray(shape=(NUM_FRAMES,NUM_FILTERS, NUM_FEATURES, 1))
+    labels = np.ndarray(shape=(NUM_FRAMES))
 
     # transform the samples into MSFC features
+    print('Parsing frames from utterances...')
     for utt in timit:
         samples = utt['samples']
         phonemes = utt['phonemes']
@@ -218,20 +196,47 @@ def serialize(train=True):
                 delta2 = _get_delta(delta)
 
                 # create the new frame representation
-                frame = np.ndarray(shape=(1, NUM_FILTERS, 3, 1), dtype=np.float32)
-                frame[0, :, 0, :] = mfsc[:,None]
-                frame[0, :, 1, :] = delta[:,None]
-                frame[0, :, 2, :] = delta2[:,None]
+                frame = np.ndarray(shape=(NUM_FILTERS, NUM_FEATURES, 1), dtype=np.float32)
+                frame[:, 0, :] = mfsc[:,None]
+                frame[:, 1, :] = delta[:,None]
+                frame[:, 2, :] = delta2[:,None]
+                frames[frame_ctn, :, :, :] = frame
 
-                # add to the record file
-                _convert_to_record(frame, np.array([pho_idx]), writer)
+                # set the phoneme label
+                labels[frame_ctn] = pho_idx
+
                 frame_ctn += 1
+
+                if frame_ctn % 10000 == 0:
+                    print('- {0} frames processed...'.format(frame_ctn))
+
                 if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
                     break
             if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
                 break
         if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
             break
+
+    print('Finished processing {0} frames!'.format(frame_ctn))
+    means = frames.mean(axis=0)
+    std = frames.std(axis=0)
+
+    # normalize zero mean and unity variance
+    frames = frames - means
+    frames = frames / std
+
+    print('Writing', output_path)
+    writer = tf.python_io.TFRecordWriter(output_path)
+
+    for i in range(frames.shape[0]):
+        # TODO: If I dont do this, the reshape after deserialization gets a wrong size
+        frame = np.ndarray(shape=(1, NUM_FILTERS, NUM_FEATURES, 1), dtype=np.float32)
+        label = labels[i]
+        frame[0, :, :, :] = frames[i]
+
+        _convert_to_record(frame, label, writer)
+        if i % 10000 == 0:
+            print('- Wrote {0} frames...'.format(i))
 
     writer.close()
 
@@ -263,19 +268,22 @@ def _read_and_decode(filename_queue):
     frame.set_shape([NUM_FILTERS * NUM_FEATURES * 1])
     frame = tf.reshape(frame, [NUM_FILTERS, NUM_FEATURES, 1])
 
+    # Convert from [0, 255] -> [-0.5, 0.5] floats.
+    #frame = tf.cast(frame, tf.float32) * (1. / 255) - 0.5
+
     # Convert label from a scalar uint8 tensor to an int32 scalar.
     label = tf.cast(features['label'], tf.int32)
 
     return frame, label
 
 
-def inputs(batch_size):
+def inputs(batch_size, train=True):
     """
     Read frames and labels in shuffled batches
     :param batch_size: size of the batch
     :return: images 4D tensor, labels 1D tensor
     """
-    filename = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN)
+    filename = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN if train else _FILENAME_TEST)
 
     with tf.name_scope('input'):
         filename_queue = tf.train.string_input_producer([filename])
@@ -297,4 +305,4 @@ def inputs(batch_size):
 
 if __name__ == '__main__':
     serialize()
-    serialize(train=False)
+    #serialize(train=False)

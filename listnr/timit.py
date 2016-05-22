@@ -21,12 +21,11 @@ tf.app.flags.DEFINE_string('max_frames', 0,
 NUM_FILTERS = 40
 NUM_FEATURES = 3
 
-
 #REGIONS = ['dr1']
 #NUM_FRAMES = 100243
 REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
-NUM_FRAMES = 1236543
-#NUM_FRAMES = 451660
+TRN_NUM_FRAMES = 1236543
+TST_NUM_FRAMES = 451660
 
 _FILENAME_TRAIN = 'train.tfrecords'
 _FILENAME_TEST = 'test.tfrecords'
@@ -43,21 +42,26 @@ def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def _get_delta(frame, deltawindow=4):
+def _get_delta(frame, deltawindow=2):
     """
     Get the delta of the input frame
     """
     delta = np.zeros(shape=frame.shape)
     for t, coef in enumerate(frame):
+
+        if t < deltawindow:
+            delta[t] = frame[t+1] - frame[t]
+            continue
+        if t >= len(frame) - deltawindow:
+            delta[t] = frame[t] - frame[t-1]
+            continue
+
         sum_coefs = 0.0
         sum_deltas = 0.0
         for dw in range(1, deltawindow):
-            coef_md = frame[t - dw]
 
-            if t + dw < len(frame):
-                coef_pd = frame[t + dw]
-            else:
-                coef_pd = frame[t + dw - len(frame)]
+            coef_md = frame[t - dw]
+            coef_pd = frame[t + dw]
 
             sum_coefs += dw * (coef_pd - coef_md)
             sum_deltas += 2 * np.power(dw, 2)
@@ -132,8 +136,10 @@ def serialize(train=True):
 
     base_data_path = FLAGS.input_train_dir if train else FLAGS.input_test_dir
     output_path = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN if train else _FILENAME_TEST)
+    num_frames = TRN_NUM_FRAMES if train else TST_NUM_FRAMES
 
     timit = []
+    print('Parsing .wav files...')
     for region in REGIONS:
         # iterate over all speakers for that region
         region_path = os.path.join(base_data_path, region)
@@ -167,8 +173,8 @@ def serialize(train=True):
     pho_ctn = 0
     frame_ctn = 0
 
-    frames = np.ndarray(shape=(NUM_FRAMES,NUM_FILTERS, NUM_FEATURES, 1))
-    labels = np.ndarray(shape=(NUM_FRAMES))
+    frames = np.ndarray(shape=(num_frames,NUM_FILTERS, NUM_FEATURES, 1))
+    labels = np.ndarray(shape=(num_frames))
 
     # transform the samples into MSFC features
     print('Parsing frames from utterances...')
@@ -241,7 +247,7 @@ def serialize(train=True):
     writer.close()
 
     # save the phoneme mapping file
-    with open(os.path.join(FLAGS.data_dir, 'phomap.json'), 'w') as f:
+    with open(os.path.join(FLAGS.data_dir, 'phon_tr.json' if train else 'phon_tst.json'), 'w') as f:
         json.dump(phonemes_map, f, indent=4, sort_keys=True)
 
 
@@ -305,4 +311,4 @@ def inputs(batch_size, train=True):
 
 if __name__ == '__main__':
     serialize()
-    #serialize(train=False)
+    serialize(train=False)

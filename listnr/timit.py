@@ -346,11 +346,19 @@ def inputs(batch_size, train=True):
     :param batch_size: size of the batch
     :return: images 4D tensor, labels 1D tensor
     """
-    filename = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN if train else _FILENAME_TEST)
-    filename += str(0)
-    print(filename)
+    if train:
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TRAIN + str(i))
+                     for i in range(FLAGS.data_files)]
+                        # for i in range(1)]
+    else:
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TEST)]
+
+    for f in filenames:
+        if not tf.gfile.Exists(f):
+            raise ValueError('Failed to find file: ' + f)
+
     with tf.name_scope('input'):
-        filename_queue = tf.train.string_input_producer([filename])
+        filename_queue = tf.train.string_input_producer([filenames])
 
         # Even when reading in multiple threads, share the filename
         # queue.

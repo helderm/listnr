@@ -1,6 +1,7 @@
 #!/bin/env python
 # -*- coding: utf-8 -*-
 import os
+import operator
 import json
 from pysndfile import sndio
 import glob
@@ -17,18 +18,37 @@ tf.app.flags.DEFINE_string('data_dir', '../data/timit/',
                            """Path to the serialized TIMIT dataset.""")
 tf.app.flags.DEFINE_string('max_frames', 0,
                            """Max number of frames to import. 0 for no limit.""")
+tf.app.flags.DEFINE_integer('data_files', 12,
+                            """ Number of separate data files to have.""")
 
 NUM_FILTERS = 40
 NUM_FEATURES = 3
 
-#REGIONS = ['dr1']
-#NUM_FRAMES = 100243
-REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
-TRN_NUM_FRAMES = 1236543
+REGIONS = ['dr1']
+TRN_NUM_FRAMES = 100243
+#REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
+#TRN_NUM_FRAMES = 1236543
 TST_NUM_FRAMES = 451660
 
 _FILENAME_TRAIN = 'train.tfrecords'
 _FILENAME_TEST = 'test.tfrecords'
+
+class2pho = {
+    'aa': {'idx': 0, 'pho': ['aa', 'ao']},
+    'ah': {'idx': 1, 'pho': ['ah', 'ax', 'ax-h']},
+    'er': { 'idx': 2, 'pho': ['er', 'axr']},
+    'hh': {'idx': 3, 'pho': ['hh', 'hv']},
+    'ih': {'idx': 4, 'pho': ['ih', 'ix']},
+    'l': {'idx': 5, 'pho': ['l', 'el']},
+    'm': {'idx': 6, 'pho': ['m', 'em']},
+    'n': {'idx': 7, 'pho': ['n', 'en', 'nx']},
+    'ng': {'idx': 8, 'pho': ['ng', 'eng']},
+    'sh': {'idx': 9, 'pho': ['sh', 'zh']},
+    'uw': {'idx': 10, 'pho': ['uw', 'ux']},
+    'sil': {'idx': 11, 'pho': ['pcl', 'tcl', 'kcl', 'bcl', 'dcl', 'gcl',
+                               'h#', 'pau', 'epi']},
+}
+
 
 def _float_feature(value):
     return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
@@ -96,15 +116,33 @@ def _get_phonemes(pfile):
     :param pfile: phoneme file
     :return: phoneme info
     """
+    global class2pho
+
     phonemes = []
     with open(pfile) as f:
         for line in f:
             parts = line.rstrip().split(' ')
-            ph = {'start': int(parts[0]),
-                  'end': int(parts[1]),
-                  'phoneme': parts[2]}
+            phoneme = parts[2]
 
-            phonemes.append(ph)
+            # search for the phoneme in th
+            found = False
+            if phoneme not in class2pho:
+                for phm, val in class2pho.items():
+                    if phoneme in val['pho']:
+                        found = True
+                        break
+                if found:
+                    phoneme = phm
+                else:
+                    idx = max(class2pho.values(), key=lambda x: x['idx'])['idx']
+                    #idx = max(class2pho.iteritems(), key=operator.itemgetter(1))[1]
+                    class2pho[phoneme] = {'idx': idx+1, 'pho': [phoneme]}
+
+            phd = {'start': int(parts[0]),
+                  'end': int(parts[1]),
+                  'phoneme': phoneme}
+
+            phonemes.append(phd)
 
     return phonemes
 
@@ -169,8 +207,6 @@ def serialize(train=True):
                                  'speaker': speaker_id,
                                  'samples': samples})
 
-    phonemes_map = {}
-    pho_ctn = 0
     frame_ctn = 0
 
     frames = np.ndarray(shape=(num_frames,NUM_FILTERS, NUM_FEATURES, 1))
@@ -184,12 +220,12 @@ def serialize(train=True):
 
         # extract each phoneme mfsc, delta and delta-delta
         for pho in phonemes:
-            if pho['phoneme'] not in phonemes_map:
-                phonemes_map[pho['phoneme']] = pho_ctn
-                pho_ctn += 1
+            # discard the glottal stop 'q'
+            if pho['phoneme'] == 'q':
+                continue
 
             # extract the frames for this phonemes only
-            pho_idx = phonemes_map[pho['phoneme']]
+            pho_idx = class2pho[pho['phoneme']]['idx']
             pho_samples = samples[pho['start']:pho['end']]
 
             # get the filterbanks
@@ -231,11 +267,13 @@ def serialize(train=True):
     frames = frames - means
     frames = frames / std
 
-    print('Writing', output_path)
-    writer = tf.python_io.TFRecordWriter(output_path)
+    num_examples_per_file = int(frames.shape[0] / FLAGS.data_files)
+    file_idx = 0
+    filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+    print('Writing', filename)
+    writer = tf.python_io.TFRecordWriter(filename)
 
     for i in range(frames.shape[0]):
-        # TODO: If I dont do this, the reshape after deserialization gets a wrong size
         frame = np.ndarray(shape=(1, NUM_FILTERS, NUM_FEATURES, 1), dtype=np.float32)
         label = labels[i]
         frame[0, :, :, :] = frames[i]
@@ -244,11 +282,18 @@ def serialize(train=True):
         if i % 10000 == 0:
             print('- Wrote {0} frames...'.format(i))
 
+        if (i + 1) % num_examples_per_file == 0:
+            writer.close()
+            file_idx += 1
+            filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+            print('Writing', filename)
+            writer = tf.python_io.TFRecordWriter(filename)
+
     writer.close()
 
     # save the phoneme mapping file
     with open(os.path.join(FLAGS.data_dir, 'phon_tr.json' if train else 'phon_tst.json'), 'w') as f:
-        json.dump(phonemes_map, f, indent=4, sort_keys=True)
+        json.dump(class2pho, f, indent=4, sort_keys=True)
 
 
 def _read_and_decode(filename_queue):
@@ -311,4 +356,4 @@ def inputs(batch_size, train=True):
 
 if __name__ == '__main__':
     serialize()
-    serialize(train=False)
+    #serialize(train=False)

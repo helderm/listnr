@@ -14,11 +14,11 @@ tf.app.flags.DEFINE_string('input_train_dir', '../data/timit/timit/timit/train/'
                            """Path to the TIMIT data directory.""")
 tf.app.flags.DEFINE_string('input_test_dir', '../data/timit/timit/timit/test/',
                            """Path to the TIMIT data directory.""")
-tf.app.flags.DEFINE_string('data_dir', '../data/timit/',
+tf.app.flags.DEFINE_string('data_dir', '../data/timit/train/',
                            """Path to the serialized TIMIT dataset.""")
 tf.app.flags.DEFINE_string('max_frames', 0,
                            """Max number of frames to import. 0 for no limit.""")
-tf.app.flags.DEFINE_integer('data_files', 4,
+tf.app.flags.DEFINE_integer('data_files', 1,
                             """ Number of separate data files to have.""")
 
 NUM_FILTERS = 40
@@ -125,6 +125,8 @@ def _get_phonemes(pfile):
         for line in f:
             parts = line.rstrip().split(' ')
             phoneme = parts[2]
+            if phoneme == 'q':
+                continue
 
             # search for the phoneme in th
             found = False
@@ -160,9 +162,6 @@ def _convert_to_record(frame, label, writer):
     #assert frame.shape[0] == NUM_FILTERS and frame.shape[1] == NUM_FEATURES and frame.shape[2] == 1
     frame_raw = frame.tostring()
     example = tf.train.Example(features=tf.train.Features(feature={
-        # 'height': _float_feature(rows),
-        # 'width': _float_feature(cols),
-        # 'depth': _float_feature(depth),
         'label': _int64_feature(int(label)),
         'frame_raw': _bytes_feature(frame_raw)}))
     writer.write(example.SerializeToString())
@@ -190,25 +189,25 @@ def serialize(train=True):
             # iterate over all utterances for that speaker
             speaker_wavs = glob.glob(speaker_path + '/*.wav')
             for wav in speaker_wavs:
+                if "sa" not in wav:
+                    # get the sound frequencies and sampling rate
+                    sndobj = sndio.read(wav)
+                    samplingrate = sndobj[1]
+                    samples = np.array(sndobj[0]) * np.iinfo(np.int16).max
 
-                # get the sound frequencies and sampling rate
-                sndobj = sndio.read(wav)
-                samplingrate = sndobj[1]
-                samples = np.array(sndobj[0]) * np.iinfo(np.int16).max
+                    # parse the phoneme file
+                    phonemes = _get_phonemes(wav.replace('.wav', '.phn'))
 
-                # parse the phoneme file
-                phonemes = _get_phonemes(wav.replace('.wav', '.phn'))
+                    # get sentence
+                    words = _get_words(wav.replace('.wav', '.wrd'))
 
-                # get sentence
-                words = _get_words(wav.replace('.wav', '.wrd'))
-
-                timit.append({'filename': wav,
-                                'samplingrate': samplingrate,
-                                 'phonemes': phonemes,
-                                 'words': words,
-                                 'gender': speaker_id[0],
-                                 'speaker': speaker_id,
-                                 'samples': samples})
+                    timit.append({'filename': wav,
+                                    'samplingrate': samplingrate,
+                                     'phonemes': phonemes,
+                                     'words': words,
+                                     'gender': speaker_id[0],
+                                     'speaker': speaker_id,
+                                     'samples': samples})
 
     frame_ctn = 0
 
@@ -229,11 +228,6 @@ def serialize(train=True):
 
         # extract each phoneme mfsc, delta and delta-delta
         for pho in phonemes:
-            #print(pho)
-            # discard the glottal stop 'q'
-            if pho['phoneme'] == 'q':
-                continue
-
             # extract the frames for this phonemes only
             pho_idx = class2pho[pho['phoneme']]['idx']
             pho_samples = samples[pho['start']:pho['end']]
@@ -272,13 +266,6 @@ def serialize(train=True):
                     if frame_ctn % 1000 == 0:
                         print('- {0} frames processed...'.format(frame_ctn))
 
-        #         if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-        #             break
-        #     if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-        #         break
-        # if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-        #     break
-
     frames = frames[0:frame_ctn, :, :, :]
     labels = labels[0:frame_ctn]
 
@@ -293,7 +280,6 @@ def serialize(train=True):
     num_examples_per_file = int(frames.shape[0] / FLAGS.data_files)
     file_idx = 0
     #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
-    print(output_path)
     filename = output_path + str(file_idx)
     print('Writing', filename)
     writer = tf.python_io.TFRecordWriter(filename)
@@ -361,7 +347,8 @@ def inputs(batch_size, train=True):
     :return: images 4D tensor, labels 1D tensor
     """
     filename = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN if train else _FILENAME_TEST)
-
+    filename += str(0)
+    print(filename)
     with tf.name_scope('input'):
         filename_queue = tf.train.string_input_producer([filename])
 

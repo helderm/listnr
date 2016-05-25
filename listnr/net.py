@@ -14,32 +14,30 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '../data/timit/train/',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 12000,
+tf.app.flags.DEFINE_integer('max_steps', 2000,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_integer('batch_size', 64,
+tf.app.flags.DEFINE_integer('batch_size', 16,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 
-tf.app.flags.DEFINE_boolean('train', False,
+tf.app.flags.DEFINE_boolean('train', True,
                             """Whether to run the training or load a checkpoint.""")
-
 
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 50000
 TOWER_NAME = 'tower'
 
 # Constants describing the training process.
-MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
-NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
+MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
+NUM_EPOCHS_PER_DECAY = 350.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.1       # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.1  # Initial learning rate.
 LOSS_THRESHOLD = 0.0001
 
 # Constants of the model
-NUM_CLASSES = 61
+NUM_CLASSES = 39
 NUM_UNITS_FULL_LAYER = 1000
 NUM_FEATURE_MAPS = 150
-
 
 
 def _variable_on_cpu(name, shape, initializer):
@@ -75,7 +73,7 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
     Variable Tensor
     """
     var = _variable_on_cpu(name, shape,
-                         tf.truncated_normal_initializer(stddev=stddev))
+                           tf.truncated_normal_initializer(stddev=stddev))
     if wd is not None:
         weight_decay = tf.mul(tf.nn.l2_loss(var), wd, name='weight_loss')
         tf.add_to_collection('losses', weight_decay)
@@ -110,7 +108,7 @@ def inference(frames):
       Logits.
     """
     with tf.variable_scope('conv1') as scope:
-        kernel = _variable_with_weight_decay('weights', shape=[8, 3, 1, NUM_FEATURE_MAPS],
+        kernel = _variable_with_weight_decay('weights', shape=[8, 1, 27, NUM_FEATURE_MAPS],
                                              stddev=1e-4, wd=0.004)
         conv = tf.nn.conv2d(frames, kernel, [1, 2, 1, 1], padding='SAME')
         biases = _variable_on_cpu('biases', [NUM_FEATURE_MAPS], tf.constant_initializer(0.0))
@@ -168,7 +166,7 @@ def loss(logits, labels):
     # Calculate the average cross entropy loss across the batch.
     labels = tf.cast(labels, tf.int64)
     cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-      logits, labels, name='cross_entropy_per_example')
+            logits, labels, name='cross_entropy_per_example')
     cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
     tf.add_to_collection('losses', cross_entropy_mean)
 
@@ -198,7 +196,7 @@ def _add_loss_summaries(total_loss):
     for l in losses + [total_loss]:
         # Name each loss as '(raw)' and name the moving average version of the loss
         # as the original loss name.
-        tf.scalar_summary(l.op.name +' (raw)', l)
+        tf.scalar_summary(l.op.name + ' (raw)', l)
         tf.scalar_summary(l.op.name, loss_averages.average(l))
 
     return loss_averages_op
@@ -221,10 +219,10 @@ def train(total_loss, global_step):
 
     # Decay the learning rate exponentially based on the number of steps.
     lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
-                                  global_step,
-                                  decay_steps,
-                                  LEARNING_RATE_DECAY_FACTOR,
-                                  staircase=True)
+                                    global_step,
+                                    decay_steps,
+                                    LEARNING_RATE_DECAY_FACTOR,
+                                    staircase=True)
     tf.scalar_summary('learning_rate', lr)
 
     # Generate moving averages of all losses and associated summaries.
@@ -249,7 +247,7 @@ def train(total_loss, global_step):
 
     # Track the moving averages of all trainable variables.
     variable_averages = tf.train.ExponentialMovingAverage(
-      MOVING_AVERAGE_DECAY, global_step)
+            MOVING_AVERAGE_DECAY, global_step)
     variables_averages_op = variable_averages.apply(tf.trainable_variables())
 
     with tf.control_dependencies([apply_gradient_op, variables_averages_op]):
@@ -259,7 +257,7 @@ def train(total_loss, global_step):
 
 
 def placeholder_inputs():
-  """Generate placeholder variables to represent the input tensors.
+    """Generate placeholder variables to represent the input tensors.
 
   These placeholders are used as inputs by the rest of the model building
   code and will be fed from the downloaded data in the .run() loop, below.
@@ -271,13 +269,13 @@ def placeholder_inputs():
     frames_placeholder: Images placeholder.
     labels_placeholder: Labels placeholder.
   """
-  # Note that the shapes of the placeholders match the shapes of the full
-  # frame and label tensors, except the first dimension is now batch_size
-  # rather than the full size of the train or test data sets.
-  frames_placeholder = tf.placeholder(tf.float32, shape=(FLAGS.batch_size,
-                                                         tm.NUM_FILTERS, tm.NUM_FEATURES, 1))
-  labels_placeholder = tf.placeholder(tf.int32, shape=(FLAGS.batch_size))
-  return frames_placeholder, labels_placeholder
+    # Note that the shapes of the placeholders match the shapes of the full
+    # frame and label tensors, except the first dimension is now batch_size
+    # rather than the full size of the train or test data sets.
+    frames_placeholder = tf.placeholder(tf.float32, shape=(FLAGS.batch_size,
+                                                           tm.NUM_FILTERS, 1, tm.Total_FEATURES))
+    labels_placeholder = tf.placeholder(tf.int32, shape=(FLAGS.batch_size))
+    return frames_placeholder, labels_placeholder
 
 
 def fill_feed_dict(frames_pl, labels_pl, sess, train=True):
@@ -299,20 +297,20 @@ def fill_feed_dict(frames_pl, labels_pl, sess, train=True):
     """
     # Create the feed_dict for the placeholders filled with the next
     # `batch size ` examples.
-    #images_feed, labels_feed = data_set.next_batch(FLAGS.batch_size,
+    # images_feed, labels_feed = data_set.next_batch(FLAGS.batch_size,
     #                                               FLAGS.fake_data)
     frames_t, labels_t = tm.inputs(FLAGS.batch_size, train)
     frames, labels = sess.run([frames_t, labels_t])
 
     feed_dict = {
-      frames_pl: frames,
-      labels_pl: labels,
+        frames_pl: frames,
+        labels_pl: labels,
     }
     return feed_dict
 
 
 def evaluation(logits, labels):
-  """Evaluate the quality of the logits at predicting the label.
+    """Evaluate the quality of the logits at predicting the label.
 
   Args:
     logits: Logits tensor, float - [batch_size, NUM_CLASSES].
@@ -323,13 +321,14 @@ def evaluation(logits, labels):
     A scalar int32 tensor with the number of examples (out of batch_size)
     that were predicted correctly.
   """
-  # For a classifier model, we can use the in_top_k Op.
-  # It returns a bool tensor with shape [batch_size] that is true for
-  # the examples where the label is in the top k (here k=1)
-  # of all logits for that example.
-  correct = tf.nn.in_top_k(logits, labels, 1)
-  # Return the number of true entries.
-  return tf.reduce_sum(tf.cast(correct, tf.int32))
+    # For a classifier model, we can use the in_top_k Op.
+    # It returns a bool tensor with shape [batch_size] that is true for
+    # the examples where the label is in the top k (here k=1)
+    # of all logits for that example.
+    print(labels)
+    correct = tf.nn.in_top_k(logits, labels, 1)
+    # Return the number of true entries.
+    return tf.reduce_sum(tf.cast(correct, tf.int32))
 
 
 def run_training():
@@ -340,9 +339,9 @@ def run_training():
         global_step = tf.Variable(0, trainable=False)
 
         # Get images and labels for runway
-        #tr_frames_t, tr_labels_t = tm.inputs(FLAGS.batch_size)
-        #ts_frames_t, ts_labels_t = tm.inputs(FLAGS.batch_size, train=False)
-        #frames, labels = placeholder_inputs()
+        # tr_frames_t, tr_labels_t = tm.inputs(FLAGS.batch_size)
+        # ts_frames_t, ts_labels_t = tm.inputs(FLAGS.batch_size, train=False)
+        # frames, labels = placeholder_inputs()
         frames, labels = tm.inputs(FLAGS.batch_size)
 
         # Build a Graph that computes the logits predictions from the
@@ -364,15 +363,15 @@ def run_training():
 
         # get a tensor for evaluating the training
         correct_examples = evaluation(logits, labels)
-        #correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-        #accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        # correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
+        # accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
         # Build an initialization operation to run below.
         init = tf.initialize_all_variables()
 
         # Start running operations on the Graph.
         sess = tf.Session(config=tf.ConfigProto(
-            log_device_placement=FLAGS.log_device_placement))
+                log_device_placement=FLAGS.log_device_placement))
         sess.run(init)
 
         # Start the queue runners.
@@ -389,42 +388,44 @@ def run_training():
                 #print(frame_val)
                 #print('-------')
                 #print(label_val)
-                #feed_dict = fill_feed_dict(frames, labels, sess)
+                # feed_dict = fill_feed_dict(frames, labels, sess)
 
-                #frames_val, labels_val = sess.run([tr_frames_t, tr_labels_t])
+                # frames_val, labels_val = sess.run([tr_frames_t, tr_labels_t])
+                #_, loss_value = sess.run([train_op, looss])
+
                 _, loss_value, num_correct_examples = sess.run([train_op, looss, correct_examples])
                 duration = time.time() - start_time
 
                 assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
-                #if np.abs(loss_value - prev_loss_value) < LOSS_THRESHOLD:
+                # if np.abs(loss_value - prev_loss_value) < LOSS_THRESHOLD:
                 #    format_str = ('%s: Model converged! step %d, loss = %.2f')
                 #    print(format_str % (datetime.now(), step, loss_value))
                 #    break
-                #prev_loss_value = loss_value
+                # prev_loss_value = loss_value
 
                 if step % 10 == 0:
-                  num_examples_per_step = FLAGS.batch_size
-                  examples_per_sec = num_examples_per_step / duration
-                  sec_per_batch = float(duration)
+                    num_examples_per_step = FLAGS.batch_size
+                    examples_per_sec = num_examples_per_step / duration
+                    sec_per_batch = float(duration)
 
-                  #frames_val, labels_val = sess.run([ts_frames_t, ts_labels_t])
-                  #ts_correct_examples = sess.run(correct_examples, feed_dict={
-                  #    frames: frames_val,
-                  #    labels: labels_val
-                  #})
-                  format_str = ('%s: step %d, loss = %.2f, train_acc = %d/%d (%.1f examples/sec; %.3f '
-                                'sec/batch)')
-                  print(format_str % (datetime.now(), step, loss_value, num_correct_examples, FLAGS.batch_size,
-                                      examples_per_sec, sec_per_batch))
+                    # frames_val, labels_val = sess.run([ts_frames_t, ts_labels_t])
+                    # ts_correct_examples = sess.run(correct_examples, feed_dict={
+                    #    frames: frames_val,
+                    #    labels: labels_val
+                    # })
+                    format_str = ('%s: step %d, loss = %.2f, train_acc = %d/%d (%.1f examples/sec; %.3f '
+                                  'sec/batch)')
+                    print(format_str % (datetime.now(), step, loss_value, num_correct_examples, FLAGS.batch_size,
+                                        examples_per_sec, sec_per_batch))
 
-                  summary_str = sess.run(summary_op)
-                  summary_writer.add_summary(summary_str, step)
+                    summary_str = sess.run(summary_op)
+                    summary_writer.add_summary(summary_str, step)
 
                 # Save the model checkpoint periodically.
                 if step % 1000 == 0 or (step + 1) == FLAGS.max_steps:
-                  checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
-                  saver.save(sess, checkpoint_path, global_step=step)
+                    checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
+                    saver.save(sess, checkpoint_path, global_step=step)
         else:
             ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
             if ckpt and ckpt.model_checkpoint_path:
@@ -433,13 +434,12 @@ def run_training():
                 raise Exception('Checkpoint not found!')
 
         # evaluate against a test set
-        #frames, labels = tm.inputs(FLAGS.batch_size, train=False)
-        #frames_val, labels_val = sess.run([frames, labels])
+        # frames, labels = tm.inputs(FLAGS.batch_size, train=False)
+        # frames_val, labels_val = sess.run([frames, labels])
         num_correct_examples = sess.run(correct_examples)
         print('test_acc = {0}/{1}'.format(num_correct_examples, FLAGS.batch_size))
 
         sess.close()
-
 
 
 if __name__ == '__main__':

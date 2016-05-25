@@ -18,11 +18,13 @@ tf.app.flags.DEFINE_string('data_dir', '../data/timit/',
                            """Path to the serialized TIMIT dataset.""")
 tf.app.flags.DEFINE_string('max_frames', 0,
                            """Max number of frames to import. 0 for no limit.""")
-tf.app.flags.DEFINE_integer('data_files', 12,
+tf.app.flags.DEFINE_integer('data_files', 4,
                             """ Number of separate data files to have.""")
 
 NUM_FILTERS = 40
 NUM_FEATURES = 3
+FrameSize = 9
+Total_FEATURES = NUM_FEATURES * FrameSize
 
 REGIONS = ['dr1']
 TRN_NUM_FRAMES = 100243
@@ -146,6 +148,7 @@ def _get_phonemes(pfile):
 
     return phonemes
 
+
 def _convert_to_record(frame, label, writer):
     """
     Serialize a single frame and label and write it
@@ -174,7 +177,7 @@ def serialize(train=True):
 
     base_data_path = FLAGS.input_train_dir if train else FLAGS.input_test_dir
     output_path = os.path.join(FLAGS.data_dir, _FILENAME_TRAIN if train else _FILENAME_TEST)
-    num_frames = TRN_NUM_FRAMES if train else TST_NUM_FRAMES
+    num_frames = TRN_NUM_FRAMES/FrameSize if train else TST_NUM_FRAMES/FrameSize
 
     timit = []
     print('Parsing .wav files...')
@@ -209,17 +212,24 @@ def serialize(train=True):
 
     frame_ctn = 0
 
-    frames = np.ndarray(shape=(num_frames,NUM_FILTERS, NUM_FEATURES, 1))
+    frames = np.ndarray(shape=(num_frames,NUM_FILTERS,1, Total_FEATURES))
     labels = np.ndarray(shape=(num_frames))
 
     # transform the samples into MSFC features
     print('Parsing frames from utterances...')
+
+    # adding the counter for fix-frames input
+    count = 0
+    input_sample = np.ndarray(shape=(NUM_FILTERS, 1, Total_FEATURES), dtype=np.float32)
+    label_list = []
+
     for utt in timit:
         samples = utt['samples']
         phonemes = utt['phonemes']
 
         # extract each phoneme mfsc, delta and delta-delta
         for pho in phonemes:
+            #print(pho)
             # discard the glottal stop 'q'
             if pho['phoneme'] == 'q':
                 continue
@@ -238,26 +248,39 @@ def serialize(train=True):
                 delta2 = _get_delta(delta)
 
                 # create the new frame representation
-                frame = np.ndarray(shape=(NUM_FILTERS, NUM_FEATURES, 1), dtype=np.float32)
-                frame[:, 0, :] = mfsc[:,None]
-                frame[:, 1, :] = delta[:,None]
-                frame[:, 2, :] = delta2[:,None]
-                frames[frame_ctn, :, :, :] = frame
+                frame = np.ndarray(shape=(NUM_FILTERS, 1, NUM_FEATURES), dtype=np.float32)
+                frame[:, :, 0] = mfsc[:,None]
+                frame[:, :, 1] = delta[:,None]
+                frame[:, :, 2] = delta2[:,None]
+                
+                input_sample[:, :, 3 * count: 3 * (count + 1)] = frame
+                label_list.append(pho_idx)
+                count += 1
+                if count == 9:
+                    count = 0
+                    frames[frame_ctn, :, :, :] = input_sample
+                    #print(label_list)
+                    #print(Counter(label_list).most_common()[0][0])
+                    #labels[frame_ctn] = Counter(label_list).most_common()[0][0]
+                    #print(label_list[4])
+                    labels[frame_ctn] = label_list[4]
+                    frame_ctn += 1
+                    #print('Finish ', frame_ctn)
+                    input_sample = np.ndarray(shape=(NUM_FILTERS,1, Total_FEATURES), dtype=np.float32)
+                    label_list.clear()
 
-                # set the phoneme label
-                labels[frame_ctn] = pho_idx
+                    if frame_ctn % 1000 == 0:
+                        print('- {0} frames processed...'.format(frame_ctn))
 
-                frame_ctn += 1
+        #         if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
+        #             break
+        #     if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
+        #         break
+        # if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
+        #     break
 
-                if frame_ctn % 10000 == 0:
-                    print('- {0} frames processed...'.format(frame_ctn))
-
-                if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-                    break
-            if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-                break
-        if FLAGS.max_frames and frame_ctn >= FLAGS.max_frames:
-            break
+    frames = frames[0:frame_ctn, :, :, :]
+    labels = labels[0:frame_ctn]
 
     print('Finished processing {0} frames!'.format(frame_ctn))
     means = frames.mean(axis=0)
@@ -269,23 +292,26 @@ def serialize(train=True):
 
     num_examples_per_file = int(frames.shape[0] / FLAGS.data_files)
     file_idx = 0
-    filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+    #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+    print(output_path)
+    filename = output_path + str(file_idx)
     print('Writing', filename)
     writer = tf.python_io.TFRecordWriter(filename)
 
     for i in range(frames.shape[0]):
-        frame = np.ndarray(shape=(1, NUM_FILTERS, NUM_FEATURES, 1), dtype=np.float32)
+        frame = np.ndarray(shape=(1, NUM_FILTERS, 1,  Total_FEATURES), dtype=np.float32)
         label = labels[i]
         frame[0, :, :, :] = frames[i]
 
         _convert_to_record(frame, label, writer)
-        if i % 10000 == 0:
+        if i % 1000 == 0:
             print('- Wrote {0} frames...'.format(i))
 
         if (i + 1) % num_examples_per_file == 0:
             writer.close()
             file_idx += 1
-            filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+            #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
+            filename = output_path + str(file_idx)
             print('Writing', filename)
             writer = tf.python_io.TFRecordWriter(filename)
 
@@ -316,8 +342,8 @@ def _read_and_decode(filename_queue):
     # length mnist.IMAGE_PIXELS) to a uint8 tensor with shape
     # [mnist.IMAGE_PIXELS].
     frame = tf.decode_raw(features['frame_raw'], tf.float32)
-    frame.set_shape([NUM_FILTERS * NUM_FEATURES * 1])
-    frame = tf.reshape(frame, [NUM_FILTERS, NUM_FEATURES, 1])
+    frame.set_shape([NUM_FILTERS * 1 * Total_FEATURES])
+    frame = tf.reshape(frame, [NUM_FILTERS, 1, Total_FEATURES])
 
     # Convert from [0, 255] -> [-0.5, 0.5] floats.
     #frame = tf.cast(frame, tf.float32) * (1. / 255) - 0.5

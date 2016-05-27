@@ -16,9 +16,7 @@ tf.app.flags.DEFINE_string('input_test_dir', '../data/timit/timit/timit/core_tes
                            """Path to the TIMIT data directory.""")
 tf.app.flags.DEFINE_string('data_dir', '../data/timit/train/',
                            """Path to the serialized TIMIT dataset.""")
-tf.app.flags.DEFINE_string('max_frames', 0,
-                           """Max number of frames to import. 0 for no limit.""")
-tf.app.flags.DEFINE_integer('data_files', 1,
+tf.app.flags.DEFINE_integer('data_files', 12,
                             """ Number of separate data files to have.""")
 
 NUM_FILTERS = 40
@@ -34,6 +32,7 @@ TST_NUM_FRAMES = 451660
 
 _FILENAME_TRAIN = 'train.tfrecords'
 _FILENAME_TEST = 'test.tfrecords'
+_FILENAME_DEV = 'dev.tfrecords'
 
 class2pho = {
     'aa': {'idx': 0, 'pho': ['aa', 'ao']},
@@ -159,7 +158,7 @@ def _convert_to_record(frame, label, writer):
     :param label: 1D label tensor
     :param writer: file writer
     """
-    #assert frame.shape[0] == NUM_FILTERS and frame.shape[1] == NUM_FEATURES and frame.shape[2] == 1
+    assert frame.shape[1] == NUM_FILTERS and frame.shape[3] == Total_FEATURES and frame.shape[2] == 1
     frame_raw = frame.tostring()
     example = tf.train.Example(features=tf.train.Features(feature={
         'label': _int64_feature(int(label)),
@@ -291,9 +290,9 @@ def serialize(train=True):
 
         _convert_to_record(frame, label, writer)
         if i % 1000 == 0:
-            print('- Wrote {0} frames...'.format(i))
+            print('- Wrote {0}/{1} frames...'.format(i, frames.shape[0]))
 
-        if (i + 1) % num_examples_per_file == 0:
+        if (i + 1) % num_examples_per_file == 0 and i+1 < frames.shape[0]:
             writer.close()
             file_idx += 1
             #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
@@ -340,41 +339,60 @@ def _read_and_decode(filename_queue):
     return frame, label
 
 
-def inputs(batch_size, train=True):
+def inputs(batch_size, num_examples_epoch, type='train', num_epochs=None, shuffle=True):
     """
     Read frames and labels in shuffled batches
     :param batch_size: size of the batch
     :return: images 4D tensor, labels 1D tensor
     """
-    if train:
+
+    if type == 'train':
         filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TRAIN + str(i))
+                 for i in range(FLAGS.data_files)]
+    #            for i in range(1)]
+    elif type == 'test':
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TEST + str(i))
                      for i in range(FLAGS.data_files)]
-                        # for i in range(1)]
+    elif type == 'dev':
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_DEV + str(i))
+                     for i in range(FLAGS.data_files)]
     else:
-        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TEST)]
+        raise Exception('Unkwown input type')
 
     for f in filenames:
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
     with tf.name_scope('input'):
-        filename_queue = tf.train.string_input_producer([filenames])
+        filename_queue = tf.train.string_input_producer(filenames, num_epochs=num_epochs, shuffle=shuffle)
 
         # Even when reading in multiple threads, share the filename
         # queue.
         frame, label = _read_and_decode(filename_queue)
 
-        # Shuffle the examples and collect them into batch_size batches.
-        # (Internally uses a RandomShuffleQueue.)
-        # We run this in two threads to avoid being a bottleneck.
-        images, sparse_labels = tf.train.shuffle_batch(
-            [frame, label], batch_size=batch_size, num_threads=2,
-            capacity=1000 + 3 * batch_size,
-            # Ensures a minimum amount of shuffling of examples.
-            min_after_dequeue=1000)
+        # Ensure that the random shuffling has good mixing properties.
+        min_fraction_of_examples_in_queue = 0.4
+        min_queue_examples = int(num_examples_epoch *
+                                 min_fraction_of_examples_in_queue)
 
-    return images, sparse_labels
+        if shuffle:
+            # Shuffle the examples and collect them into batch_size batches.
+            # (Internally uses a RandomShuffleQueue.)
+            # We run this in two threads to avoid being a bottleneck.
+            images_batch, labels_batch = tf.train.shuffle_batch(
+                [frame, label], batch_size=batch_size, num_threads=2,
+                capacity=min_queue_examples + 3 * batch_size,
+                # Ensures a minimum amount of shuffling of examples.
+                min_after_dequeue=min_queue_examples)
+        else:
+            images_batch, labels_batch = tf.train.batch(
+                [frame, label],
+                batch_size=batch_size,
+                num_threads=2,
+                capacity=min_queue_examples + 3 * batch_size)
+
+    return images_batch, labels_batch
 
 if __name__ == '__main__':
-    serialize()
-    #serialize(train=False)
+    #serialize()
+    serialize(train=False)

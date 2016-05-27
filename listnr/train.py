@@ -17,7 +17,7 @@ tf.app.flags.DEFINE_string('train_dir', '../data/timit/train/',
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('num_epochs', 30,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_integer('batch_size', 128,
+tf.app.flags.DEFINE_integer('batch_size', 32,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
@@ -90,44 +90,6 @@ def train(total_loss, global_step):
     return train_op
 
 
-def evaluation(logits, labels):
-    """Evaluate the quality of the logits at predicting the label.
-
-  Args:
-    logits: Logits tensor, float - [batch_size, NUM_CLASSES].
-    labels: Labels tensor, int32 - [batch_size], with values in the
-      range [0, NUM_CLASSES).
-
-  Returns:
-    A scalar int32 tensor with the number of examples (out of batch_size)
-    that were predicted correctly.
-  """
-    # For a classifier model, we can use the in_top_k Op.
-    # It returns a bool tensor with shape [batch_size] that is true for
-    # the examples where the label is in the top k (here k=1)
-    # of all logits for that example.
-    correct = tf.nn.in_top_k(logits, labels, 1)
-
-    acc = tf.reduce_sum(tf.cast(correct, tf.int32)) / FLAGS.batch_size
-
-    acc_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
-    accuracies = tf.get_collection('accuracies')
-    accuracies = accuracies + [acc]
-    acc_averages_op = acc_averages.apply(accuracies)
-
-    for a in accuracies:
-        tf.scalar_summary('accuracies', acc_averages.average(a))
-
-    # add a summary for the accuracy
-    tf.scalar_summary('accuracies (raw)', acc)
-
-    tf.add_to_collection('accuracies', acc)
-
-
-    # Return the number of true entries.
-    return acc
-
-
 def run_training():
     """
     Train the Listnr model for a number of steps
@@ -149,7 +111,7 @@ def run_training():
         looss = md.loss(logits, labels)
 
         # calculate accuracy
-        accuracy = evaluation(logits, labels)
+        accuracy = md.accuracy(logits, labels)
 
         # Build a Graph that trains the model with one batch of examples and
         # updates the model parameters.

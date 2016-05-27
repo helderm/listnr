@@ -12,7 +12,7 @@ import features.base as ft
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('input_train_dir', '../data/timit/timit/timit/train/',
                            """Path to the TIMIT data directory.""")
-tf.app.flags.DEFINE_string('input_test_dir', '../data/timit/timit/timit/test/',
+tf.app.flags.DEFINE_string('input_test_dir', '../data/timit/timit/timit/core_test/',
                            """Path to the TIMIT data directory.""")
 tf.app.flags.DEFINE_string('data_dir', '../data/timit/train/',
                            """Path to the serialized TIMIT dataset.""")
@@ -26,10 +26,10 @@ NUM_FEATURES = 3
 FrameSize = 9
 Total_FEATURES = NUM_FEATURES * FrameSize
 
-REGIONS = ['dr1']
-TRN_NUM_FRAMES = 100243
-#REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
-#TRN_NUM_FRAMES = 1236543
+#REGIONS = ['dr1']
+#TRN_NUM_FRAMES = 100243
+REGIONS = ['dr1', 'dr2', 'dr3', 'dr4', 'dr5', 'dr6', 'dr7', 'dr8']
+TRN_NUM_FRAMES = 1236543
 TST_NUM_FRAMES = 451660
 
 _FILENAME_TRAIN = 'train.tfrecords'

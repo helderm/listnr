@@ -8,8 +8,10 @@ FLAGS = tf.app.flags.FLAGS
 
 # Constants of the model
 NUM_CLASSES = 39
-NUM_UNITS_FULL_LAYER = 1000
-KERNEL_SIZE = 150
+NUM_UNITS_FULL_LAYER_1 = 256
+NUM_UNITS_FULL_LAYER_2 = 128
+KERNEL_SIZE_1 = 96
+KERNEL_SIZE_2 = 256
 
 TOWER_NAME = 'tower'
 MOVING_AVERAGE_DECAY = 0.9999
@@ -82,41 +84,55 @@ def inference(frames):
       Logits.
     """
     with tf.variable_scope('conv1') as scope:
-        kernel = _variable_with_weight_decay('weights', shape=[8, 1, 27, KERNEL_SIZE],
+        kernel = _variable_with_weight_decay('weights', shape=[8, 1, 27, KERNEL_SIZE_1],
                                              stddev=1e-4, wd=0.004)
         conv = tf.nn.conv2d(frames, kernel, [1, 2, 1, 1], padding='SAME')
-        biases = _variable_on_cpu('biases', [KERNEL_SIZE], tf.constant_initializer(0.0))
+        biases = _variable_on_cpu('biases', [KERNEL_SIZE_1], tf.constant_initializer(0.0))
         bias = tf.nn.bias_add(conv, biases)
         conv1 = tf.nn.relu(bias, name=scope.name)
         _activation_summary(conv1)
 
     # pool1
-    pool1 = tf.nn.max_pool(conv1, ksize=[1, 6, 1, 1], strides=[1, 2, 1, 1],
+    pool1 = tf.nn.max_pool(conv1, ksize=[1, 6, 1, 1], strides=[1, 1, 1, 1],
                            padding='SAME', name='pool1')
+
+    with tf.variable_scope('conv2') as scope:
+        kernel = _variable_with_weight_decay('weights', shape=[4, 1, KERNEL_SIZE_1, KERNEL_SIZE_2],
+                                             stddev=1e-4, wd=0.004)
+        conv = tf.nn.conv2d(pool1, kernel, [1, 2, 1, 1], padding='SAME')
+        biases = _variable_on_cpu('biases', [KERNEL_SIZE_2], tf.constant_initializer(0.0))
+        bias = tf.nn.bias_add(conv, biases)
+        conv2 = tf.nn.relu(bias, name=scope.name)
+        _activation_summary(conv2)
+
+    # pool2
+    pool2 = tf.nn.max_pool(conv2, ksize=[1, 6, 1, 1], strides=[1, 1, 1, 1],
+                           padding='SAME', name='pool1')
+
 
     # local2
     with tf.variable_scope('local2') as scope:
         # Move everything into depth so we can perform a single matrix multiply.
-        reshape = tf.reshape(pool1, [FLAGS.batch_size, -1])
+        reshape = tf.reshape(pool2, [FLAGS.batch_size, -1])
         dim = reshape.get_shape()[1].value
-        weights = _variable_with_weight_decay('weights', shape=[dim, NUM_UNITS_FULL_LAYER],
+        weights = _variable_with_weight_decay('weights', shape=[dim, NUM_UNITS_FULL_LAYER_1],
                                               stddev=0.04, wd=0.0)
-        biases = _variable_on_cpu('biases', [NUM_UNITS_FULL_LAYER], tf.constant_initializer(0.1))
+        biases = _variable_on_cpu('biases', [NUM_UNITS_FULL_LAYER_1], tf.constant_initializer(0.1))
         local2 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
         _activation_summary(local2)
 
     # local3
     with tf.variable_scope('local3') as scope:
-        weights = _variable_with_weight_decay('weights', shape=[NUM_UNITS_FULL_LAYER, NUM_UNITS_FULL_LAYER],
+        weights = _variable_with_weight_decay('weights', shape=[NUM_UNITS_FULL_LAYER_1, NUM_UNITS_FULL_LAYER_2],
                                               stddev=0.04, wd=0.0)
-        biases = _variable_on_cpu('biases', [NUM_UNITS_FULL_LAYER], tf.constant_initializer(0.1))
+        biases = _variable_on_cpu('biases', [NUM_UNITS_FULL_LAYER_2], tf.constant_initializer(0.1))
         local3 = tf.nn.relu(tf.matmul(local2, weights) + biases, name=scope.name)
         _activation_summary(local3)
 
     # softmax, i.e. softmax(WX + b)
     with tf.variable_scope('softmax_linear') as scope:
-        weights = _variable_with_weight_decay('weights', [NUM_UNITS_FULL_LAYER, NUM_CLASSES],
-                                              stddev=1 / float(NUM_UNITS_FULL_LAYER), wd=0.0)
+        weights = _variable_with_weight_decay('weights', [NUM_UNITS_FULL_LAYER_2, NUM_CLASSES],
+                                              stddev=1 / float(NUM_UNITS_FULL_LAYER_2), wd=0.0)
         biases = _variable_on_cpu('biases', [NUM_CLASSES],
                                   tf.constant_initializer(0.0))
         softmax_linear = tf.add(tf.matmul(local3, weights), biases, name=scope.name)

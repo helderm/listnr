@@ -8,17 +8,23 @@ import glob
 import numpy as np
 import tensorflow as tf
 import features.base as ft
+from collections import Counter
+import math
+from random import shuffle
+
 
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('input_train_dir', '../data/timit/timit/timit/train/',
                            """Path to the TIMIT data directory.""")
 tf.app.flags.DEFINE_string('input_test_dir', '../data/timit/timit/timit/core_test/',
                            """Path to the TIMIT data directory.""")
-tf.app.flags.DEFINE_string('data_dir', '../data/timit/train/',
+tf.app.flags.DEFINE_string('input_dev_dir', '../data/timit/timit/timit/dev/',
+                           """Path to the TIMIT data directory.""")
+tf.app.flags.DEFINE_string('data_dir', '../data/train/',
                            """Path to the serialized TIMIT dataset.""")
 tf.app.flags.DEFINE_integer('data_files', 12,
                             """ Number of separate data files to have.""")
-
+Count_global = 0
 NUM_FILTERS = 40
 NUM_FEATURES = 3
 FrameSize = 9
@@ -33,6 +39,7 @@ TST_NUM_FRAMES = 451660
 _FILENAME_TRAIN = 'train.tfrecords'
 _FILENAME_TEST = 'test.tfrecords'
 _FILENAME_DEV = 'dev.tfrecords'
+_FILENAME_VAL = 'val.tfrecords'
 
 class2pho = {
     'aa': {'idx': 0, 'pho': ['aa', 'ao']},
@@ -163,6 +170,8 @@ def _convert_to_record(frame, label, writer):
     example = tf.train.Example(features=tf.train.Features(feature={
         'label': _int64_feature(int(label)),
         'frame_raw': _bytes_feature(frame_raw)}))
+    global Count_global
+    Count_global += 1
     writer.write(example.SerializeToString())
 
 
@@ -254,9 +263,9 @@ def serialize(train=True):
                     frames[frame_ctn, :, :, :] = input_sample
                     #print(label_list)
                     #print(Counter(label_list).most_common()[0][0])
-                    #labels[frame_ctn] = Counter(label_list).most_common()[0][0]
+                    labels[frame_ctn] = Counter(label_list).most_common()[0][0]
                     #print(label_list[4])
-                    labels[frame_ctn] = label_list[4]
+                    #labels[frame_ctn] = label_list[4]
                     frame_ctn += 1
                     #print('Finish ', frame_ctn)
                     input_sample = np.ndarray(shape=(NUM_FILTERS,1, Total_FEATURES), dtype=np.float32)
@@ -276,30 +285,40 @@ def serialize(train=True):
     frames = frames - means
     frames = frames / std
 
-    num_examples_per_file = int(frames.shape[0] / FLAGS.data_files)
-    file_idx = 0
-    #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
-    filename = output_path + str(file_idx)
+    # shuffle the frame
+    frames_shuf = np.ndarray(shape=(frame_ctn, NUM_FILTERS, 1, Total_FEATURES))
+    labels_shuf = np.ndarray(shape=(frame_ctn))
+    index_shuf = list(range(len(frames)))
+    shuffle(index_shuf)
+    index = 0
+    for i in index_shuf:
+        frames_shuf[index, :, :, :] = frames[i]
+        labels_shuf[index] = labels[i]
+        index += 1
+    print('Finish shuffle.............................')
+
+    filename = output_path
+    num_of_train = math.ceil(frame_ctn * 0.75)
+    print('Total number of train file: ', num_of_train)
     print('Writing', filename)
     writer = tf.python_io.TFRecordWriter(filename)
 
-    for i in range(frames.shape[0]):
+    for i in range(frames_shuf.shape[0]):
         frame = np.ndarray(shape=(1, NUM_FILTERS, 1,  Total_FEATURES), dtype=np.float32)
-        label = labels[i]
-        frame[0, :, :, :] = frames[i]
+        label = labels_shuf[i]
+        frame[0, :, :, :] = frames_shuf[i]
 
         _convert_to_record(frame, label, writer)
         if i % 1000 == 0:
-            print('- Wrote {0}/{1} frames...'.format(i, frames.shape[0]))
+            print('- Wrote {0}/{1} frames...'.format(i, frames_shuf.shape[0]))
 
-        if (i + 1) % num_examples_per_file == 0 and i+1 < frames.shape[0]:
+        if i == (num_of_train-1):
             writer.close()
-            file_idx += 1
-            #filename = os.path.join(FLAGS.data_dir, output_path + str(file_idx))
-            filename = output_path + str(file_idx)
-            print('Writing', filename)
+            filename = os.path.join(FLAGS.data_dir, _FILENAME_VAL)
+            print('Writing', filename, '\t from frames', i)
             writer = tf.python_io.TFRecordWriter(filename)
 
+    print('Finish Writing ', i)
     writer.close()
 
     # save the phoneme mapping file
@@ -347,15 +366,13 @@ def inputs(batch_size, num_examples_epoch, type='train', num_epochs=None, shuffl
     """
 
     if type == 'train':
-        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TRAIN + str(i))
-                 for i in range(FLAGS.data_files)]
-    #            for i in range(1)]
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TRAIN)]
     elif type == 'test':
-        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TEST + str(i))
-                     for i in range(FLAGS.data_files)]
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_TEST)]
     elif type == 'dev':
-        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_DEV + str(i))
-                     for i in range(FLAGS.data_files)]
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_DEV)]
+    elif type == 'val':
+        filenames = [os.path.join(FLAGS.data_dir, _FILENAME_VAL)]
     else:
         raise Exception('Unkwown input type')
 
@@ -395,4 +412,5 @@ def inputs(batch_size, num_examples_epoch, type='train', num_epochs=None, shuffl
 
 if __name__ == '__main__':
     #serialize()
-    serialize(train=False)
+    serialize(train=True)
+    print(Count_global)

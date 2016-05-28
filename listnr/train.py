@@ -12,19 +12,23 @@ import timit as tm
 import model as md
 
 FLAGS = tf.app.flags.FLAGS
-tf.app.flags.DEFINE_string('train_dir', '../data/timit/train/',
+tf.app.flags.DEFINE_string('train_dir', '../data/train/',
                            """Directory where to write event logs """
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('num_epochs', 30,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_integer('batch_size', 32,
+tf.app.flags.DEFINE_integer('batch_size', 64,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 tf.app.flags.DEFINE_boolean('train', True,
                             """Whether to run the training or load a checkpoint.""")
 
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 106275
+
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 79707
+NUM_EXAMPLES_PER_EPOCH_FOR_VAL = 26568
+NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 5530
+NUM_EXAMPLES_PER_EPOCH_FOR_DEV = 10913
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
@@ -118,7 +122,7 @@ def run_training():
         train_op = train(looss, global_step)
 
         # Create a saver.
-        saver = tf.train.Saver(tf.all_variables())
+        saver = tf.train.Saver(tf.all_variables(), max_to_keep=FLAGS.num_epochs)
 
         # Build the summary operation based on the TF collection of Summaries.
         summary_op = tf.merge_all_summaries()
@@ -138,20 +142,21 @@ def run_training():
 
         # run the training
         steps_per_epoch = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size)
+
         max_steps = FLAGS.num_epochs * steps_per_epoch
 
         losses_epochs = []
         losses_batches = []
         accuracies_epochs = []
         accuracies_batches = []
-        for step in range(max_steps):
+        for step in range(max_steps+1):
             start_time = time.time()
             _, loss_value, acc_value = sess.run([train_op, looss, accuracy])
             duration = time.time() - start_time
 
             assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
-            if step % 10 == 0:
+            if step % 100 == 0:
                 num_examples_per_step = FLAGS.batch_size
                 examples_per_sec = num_examples_per_step / duration
                 sec_per_batch = float(duration)
@@ -167,19 +172,20 @@ def run_training():
                 accuracies_batches.append(acc_value)
 
             # Save the model checkpoint periodically.
-            if step % steps_per_epoch == 0 or (step + 1) == max_steps or _shutdown:
-                checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
-                saver.save(sess, checkpoint_path, global_step=step)
+            if step > 1:
+                if (step-1) % steps_per_epoch == 0 or (step + 1) == max_steps or _shutdown:
+                    checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
+                    saver.save(sess, checkpoint_path, global_step=step)
 
-                accuracies_epochs.append(np.mean(accuracies_batches))
-                losses_epochs.append(np.mean(accuracies_batches))
+                    #accuracies_epochs.append(np.mean(accuracies_batches))
+                    #losses_epochs.append(np.mean(losses_batches))
 
-                # save accuracy and loss
-                np.save(os.path.join(FLAGS.train_dir, 'tr_loss'), np.array(losses_epochs))
-                np.save(os.path.join(FLAGS.train_dir, 'tr_accuracy'), np.array(accuracies_epochs))
-
-                accuracies_batches = []
-                losses_batches = []
+                    # save accuracy and loss
+                    np.save(os.path.join(FLAGS.train_dir, 'tr_loss'), np.array(losses_batches))
+                    np.save(os.path.join(FLAGS.train_dir, 'tr_accuracy'), np.array(accuracies_batches))
+                    print('Saving model: ', (step-1) / steps_per_epoch)
+                    accuracies_batches = []
+                    losses_batches = []
 
             if _shutdown:
                 break

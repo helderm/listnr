@@ -29,15 +29,16 @@ import tensorflow as tf
 import timit as tm
 import model as md
 
-NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 5000
-NUM_EXAMPLES_PER_EPOCH_FOR_DEV = 10000
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 106275
+NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 5530
+NUM_EXAMPLES_PER_EPOCH_FOR_DEV = 10913
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 79707
+NUM_EXAMPLES_PER_EPOCH_FOR_VAL = 26568
 
 FLAGS = tf.app.flags.FLAGS
 
 tf.app.flags.DEFINE_string('eval_dir', '../data/eval/',
                            """Directory where to write event logs.""")
-tf.app.flags.DEFINE_string('eval_type', 'test',
+tf.app.flags.DEFINE_string('eval_type', 'train',
                            """Either 'test' or 'train_eval'.""")
 tf.app.flags.DEFINE_string('checkpoint_dir', '../data/train/',
                            """Directory where to read model checkpoints.""")
@@ -57,6 +58,8 @@ def _get_num_examples():
         return NUM_EXAMPLES_PER_EPOCH_FOR_TEST
     elif eval_type == 'dev':
         return NUM_EXAMPLES_PER_EPOCH_FOR_DEV
+    elif eval_type == 'val':
+        return NUM_EXAMPLES_PER_EPOCH_FOR_VAL
     else:
         raise Exception('Unknown eval_type')
 
@@ -72,7 +75,6 @@ def eval_once(num_examples, saver, summary_writer, top_k_op, summary_op):
     """
     with tf.Session() as sess:
         ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
-
 
         accuracies = []
         steps = []
@@ -109,6 +111,7 @@ def eval_once(num_examples, saver, summary_writer, top_k_op, summary_op):
 
                 # Compute precision @ 1.
                 precision = true_count / (step * FLAGS.batch_size)
+                print(true_count, step * FLAGS.batch_size)
                 print('%s: precision @ 1 = %.3f' % (datetime.now(), precision))
                 accuracies.append(precision)
 
@@ -126,12 +129,11 @@ def eval_once(num_examples, saver, summary_writer, top_k_op, summary_op):
         np.save(os.path.join(FLAGS.eval_dir, FLAGS.eval_type + '_steps'), np.array(steps))
 
 
-
 def evaluate():
     """Eval Listnr for a number of steps."""
 
     ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)
-
+    print(ckpt)
     accuracies = []
     steps = []
     for path in ckpt.all_model_checkpoint_paths:
@@ -164,6 +166,7 @@ def evaluate():
                 # Restores from checkpoint
                 ckpt_path = path if not os.path.isabs(FLAGS.checkpoint_dir) \
                     else os.path.join(FLAGS.checkpoint_dir, path)
+                print(ckpt_path)
                 saver.restore(sess, ckpt_path)
                 # Assuming model_checkpoint_path looks something like:
                 #   /my-favorite-path/cifar10_train/model.ckpt-0,
@@ -192,6 +195,7 @@ def evaluate():
 
                     # Compute precision @ 1.
                     precision = true_count / (step * FLAGS.batch_size)
+                    print(true_count, step * FLAGS.batch_size)
                     print('%s: precision @ 1 = %.3f' % (datetime.now(), precision))
                     accuracies.append(precision)
 

@@ -172,7 +172,6 @@ def run_training():
                 accuracies_batches.append(acc_value)
 
             # Save the model checkpoint periodically.
-            if step > 1:
                 if (step-1) % steps_per_epoch == 0 or (step + 1) == max_steps or _shutdown:
                     checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
                     saver.save(sess, checkpoint_path, global_step=step)
@@ -184,8 +183,7 @@ def run_training():
                     np.save(os.path.join(FLAGS.train_dir, 'tr_loss'), np.array(losses_batches))
                     np.save(os.path.join(FLAGS.train_dir, 'tr_accuracy'), np.array(accuracies_batches))
                     print('Saving model: ', (step-1) / steps_per_epoch)
-                    accuracies_batches = []
-                    losses_batches = []
+
 
             if _shutdown:
                 break

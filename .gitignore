@@ -2,6 +2,8 @@ devenv/
 *egg-info
 *.pyc
 .tox
+data/*
 data/timit/*
 data/tidigits/*
 .idea/
+./*Result
